@@ -1,0 +1,228 @@
+import pygame
+import math
+import random
+
+# --- Inicialização do Pygame ---
+pygame.init()
+
+# --- Constantes do Jogo ---
+LARGURA_TELA = 800
+ALTURA_TELA = 600
+TITULO = "Demo Top-Down Shooter"
+
+# Cores (RGB)
+BRANCO = (255, 255, 255)
+PRETO = (0, 0, 0)
+VERMELHO = (255, 0, 0)
+VERDE = (0, 255, 0)
+AZUL = (0, 0, 255)
+
+# Configurações da tela
+tela = pygame.display.set_mode((LARGURA_TELA, ALTURA_TELA))
+pygame.display.set_caption(TITULO)
+relogio = pygame.time.Clock() # Objeto para controlar o FPS
+
+# Fontes para texto
+fonte = pygame.font.Font(None, 36)
+fonte_game_over = pygame.font.Font(None, 72)
+
+# --- Classes do Jogo ---
+
+class Jogador(pygame.sprite.Sprite):
+    """ Classe que representa o jogador """
+    def __init__(self):
+        super().__init__()
+        # Cria a imagem original (um triângulo para indicar a direção)
+        self.imagem_original = pygame.Surface((30, 30), pygame.SRCALPHA)
+        pygame.draw.polygon(self.imagem_original, VERDE, [(15, 0), (0, 30), (30, 30)])
+        self.image = self.imagem_original
+        self.rect = self.image.get_rect(center=(LARGURA_TELA / 2, ALTURA_TELA / 2))
+        self.velocidade = 5
+        self.vida = 100
+
+    def update(self):
+        # Movimento baseado nas teclas pressionadas
+        teclas = pygame.key.get_pressed()
+        if teclas[pygame.K_a] and self.rect.left > 0:
+            self.rect.x -= self.velocidade
+        if teclas[pygame.K_d] and self.rect.right < LARGURA_TELA:
+            self.rect.x += self.velocidade
+        if teclas[pygame.K_w] and self.rect.top > 0:
+            self.rect.y -= self.velocidade
+        if teclas[pygame.K_s] and self.rect.bottom < ALTURA_TELA:
+            self.rect.y += self.velocidade
+
+        # Rotação para seguir o mouse
+        pos_mouse = pygame.mouse.get_pos()
+        dx = pos_mouse[0] - self.rect.centerx
+        dy = pos_mouse[1] - self.rect.centery
+        # Usamos atan2 para calcular o ângulo em radianos e depois convertemos para graus
+        angulo = math.degrees(math.atan2(-dy, dx)) - 90
+
+        # Rotacionamos a imagem original para evitar distorção acumulada
+        self.image = pygame.transform.rotate(self.imagem_original, angulo)
+        self.rect = self.image.get_rect(center=self.rect.center)
+
+    def atirar(self):
+        pos_mouse = pygame.mouse.get_pos()
+        return Projetil(self.rect.centerx, self.rect.centery, pos_mouse)
+
+class Projetil(pygame.sprite.Sprite):
+    """ Classe para os projéteis """
+    def __init__(self, x, y, pos_mouse):
+        super().__init__()
+        self.image = pygame.Surface((8, 8))
+        self.image.fill(AZUL)
+        self.rect = self.image.get_rect(center=(x, y))
+        self.velocidade = 10
+
+        # Calcular o vetor de direção normalizado
+        dx = pos_mouse[0] - x
+        dy = pos_mouse[1] - y
+        distancia = math.hypot(dx, dy)
+        if distancia == 0:
+            distancia = 1 # Evita divisão por zero
+
+        self.dx = dx / distancia
+        self.dy = dy / distancia
+
+    def update(self):
+        self.rect.x += self.dx * self.velocidade
+        self.rect.y += self.dy * self.velocidade
+
+        # Remove o projétil se sair da tela
+        if not tela.get_rect().colliderect(self.rect):
+            self.kill()
+
+class Inimigo(pygame.sprite.Sprite):
+    """ Classe para os inimigos """
+    def __init__(self, jogador):
+        super().__init__()
+        self.image = pygame.Surface((25, 25))
+        self.image.fill(VERMELHO)
+        self.rect = self.image.get_rect()
+        self.jogador = jogador # Referência ao jogador para perseguição
+        self.velocidade = 2
+
+        # Define uma posição inicial aleatória nas bordas da tela
+        borda = random.choice(['top', 'bottom', 'left', 'right'])
+        if borda == 'top':
+            self.rect.x = random.randint(0, LARGURA_TELA)
+            self.rect.y = -self.rect.height
+        elif borda == 'bottom':
+            self.rect.x = random.randint(0, LARGURA_TELA)
+            self.rect.y = ALTURA_TELA
+        elif borda == 'left':
+            self.rect.x = -self.rect.width
+            self.rect.y = random.randint(0, ALTURA_TELA)
+        else: # right
+            self.rect.x = LARGURA_TELA
+            self.rect.y = random.randint(0, ALTURA_TELA)
+
+    def update(self):
+        # Persegue o jogador
+        dx = self.jogador.rect.centerx - self.rect.centerx
+        dy = self.jogador.rect.centery - self.rect.centery
+        distancia = math.hypot(dx, dy)
+        if distancia > 0:
+            self.rect.x += (dx / distancia) * self.velocidade
+            self.rect.y += (dy / distancia) * self.velocidade
+
+# --- Grupos de Sprites ---
+todos_sprites = pygame.sprite.Group()
+projeteis = pygame.sprite.Group()
+inimigos = pygame.sprite.Group()
+
+# Criação do jogador
+jogador = Jogador()
+todos_sprites.add(jogador)
+
+# --- Variáveis do Jogo ---
+pontuacao = 0
+game_over = False
+
+# Temporizador para criar inimigos
+SPAWN_INIMIGO_EVENT = pygame.USEREVENT + 1
+pygame.time.set_timer(SPAWN_INIMIGO_EVENT, 1000) # Cria um inimigo a cada 1000 ms (1 segundo)
+
+# --- Loop Principal do Jogo ---
+rodando = True
+while rodando:
+    # Define o FPS
+    relogio.tick(60)
+
+    # --- Tratamento de Eventos ---
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            rodando = False
+
+        # Evento de clique para atirar
+        if event.type == pygame.MOUSEBUTTONDOWN and not game_over:
+            if event.button == 1: # Botão esquerdo do mouse
+                projétil = jogador.atirar()
+                todos_sprites.add(projétil)
+                projeteis.add(projétil)
+
+        # Evento para criar inimigos
+        if event.type == SPAWN_INIMIGO_EVENT and not game_over:
+            inimigo = Inimigo(jogador)
+            todos_sprites.add(inimigo)
+            inimigos.add(inimigo)
+
+        # Reiniciar o jogo
+        if event.type == pygame.KEYDOWN and game_over:
+            if event.key == pygame.K_r:
+                # Reseta o jogo
+                game_over = False
+                todos_sprites.empty()
+                projeteis.empty()
+                inimigos.empty()
+                jogador = Jogador()
+                todos_sprites.add(jogador)
+                pontuacao = 0
+
+    if not game_over:
+        # --- Atualização da Lógica ---
+        todos_sprites.update()
+
+        # Colisão: Projéteis com Inimigos
+        colisoes_projeteis_inimigos = pygame.sprite.groupcollide(projeteis, inimigos, True, True)
+        if colisoes_projeteis_inimigos:
+            pontuacao += 10 # Adiciona pontos por cada inimigo destruído
+
+        # Colisão: Inimigos com Jogador
+        colisoes_inimigos_jogador = pygame.sprite.spritecollide(jogador, inimigos, True)
+        for inimigo in colisoes_inimigos_jogador:
+            jogador.vida -= 25
+            if jogador.vida <= 0:
+                game_over = True
+
+    # --- Desenho na Tela ---
+    tela.fill(PRETO) # Fundo preto
+
+    # Desenha todos os sprites
+    todos_sprites.draw(tela)
+
+    # Desenha o HUD (Vida e Pontuação)
+    texto_vida = fonte.render(f"Vida: {jogador.vida}", True, VERDE)
+    tela.blit(texto_vida, (10, 10))
+
+    texto_pontuacao = fonte.render(f"Pontuação: {pontuacao}", True, BRANCO)
+    tela.blit(texto_pontuacao, (LARGURA_TELA - texto_pontuacao.get_width() - 10, 10))
+
+    # Desenha a barra de vida
+    pygame.draw.rect(tela, VERMELHO, (10, 40, 100, 10))
+    pygame.draw.rect(tela, VERDE, (10, 40, jogador.vida, 10))
+
+    if game_over:
+        texto_go = fonte_game_over.render("GAME OVER", True, VERMELHO)
+        texto_restart = fonte.render("Pressione 'R' para reiniciar", True, BRANCO)
+
+        tela.blit(texto_go, (LARGURA_TELA/2 - texto_go.get_width()/2, ALTURA_TELA/2 - texto_go.get_height()/2))
+        tela.blit(texto_restart, (LARGURA_TELA/2 - texto_restart.get_width()/2, ALTURA_TELA/2 + 50))
+
+    # Atualiza a tela para exibir o que foi desenhado
+    pygame.display.flip()
+
+# --- Fim do Jogo ---
+pygame.quit()
